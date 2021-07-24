@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+  <script src="https://unpkg.com/peerjs@1.3.1/dist/peerjs.min.js"></script>
+  <script src="https://cdn.rawgit.com/davidshimjs/qrcodejs/gh-pages/qrcode.min.js"></script>
+
+  <style>
+    * {
+      margin: 0;
+      box-sizing: border-box;
+    }
+
+    #app {
+      height: 100vh;
+      background-color: antiquewhite;
+      padding: .75em;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #status {
+      padding: .5em;
+      border: solid black 1px;
+      border-radius: 4px;
+      background-color: white;
+    }
+
+    #qrcode {
+      margin-top: 20px;
+      flex: 1 1 0;
+    }
+
+    #qrcode img {
+      width: 100%;
+      max-height: min(70vh, 500px);
+      object-fit: contain;
+      image-rendering: pixelated;
+    }
+
+    #message {
+      margin-top: 20px;
+      background-color: white;
+    }
+
+    p {
+      padding: .5em;
+    }
+
+    textarea {
+      max-width: 100%;
+      min-width: 100%;
+      flex: 1 1 0;
+      border-radius: 4px;
+      padding: .5em;
+    }
+
+    #send-btn {
+      transition: 0.1s;
+      margin-top: 10px;
+      color: whitesmoke;
+      background-color: royalblue;
+      cursor: pointer;
+      text-align: center;
+      border-radius: 4px;
+      padding: .75em;
+      user-select: none;
+    }
+
+    #send-btn:active {
+      transition: 0s;
+
+      filter: brightness(0.9);
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+    <div id="status">
+      Status: Loading...
+    </div>
+    <div id="qrcode"></div>
+    <div id="message">
+    </div>
+    <textarea id="text" hidden></textarea>
+    <div id="send-btn" hidden>
+      Send
+    </div>
+  </div>
+
+  <script>
+    let conn;
+    let peer;
+    let name;
+    const qrcode = document.getElementById("qrcode");
+    const status = document.getElementById("status");
+    const message = document.getElementById("message");
+    const text = document.getElementById("text");
+    const sendBtn = document.getElementById("send-btn");
+    const targetId = new URLSearchParams(location.search).get("id");
+
+    (function start() {
+      if (targetId) {
+        qrcode.hidden = true;
+        connectPeer(targetId)
+      }
+      else
+        newPeer();
+      sendBtn.onclick = () => {
+        if (!text.value.trim()) return;
+        conn?.send(text.value);
+        text.value = "";
+      }
+    })()
+
+    function newPeer() {
+      peer = new Peer();
+      peer.on('open', function (id) {
+        console.log(id);
+        status.innerText = "Status: Waiting connection..."
+        new QRCode(qrcode, location.href + "?id=" + id);
+      });
+      peer.on('connection', (c) => {
+        conn = c;
+        initConnection();
+      });
+    }
+
+    function initConnection() {
+      conn.once('data', initName);
+      conn.on('open', () => {
+        conn.send('server say hello!');
+        status.innerText = "Status: Connected from unknow, refresh this page to restart";
+        qrcode.hidden = true;
+      });
+      conn.on("error", () => {
+        conn.close();
+        peer.disconnect();
+        status.innerText = "Status: Error occurred, refresh this page to restart";
+      })
+      conn.on("close", () => {
+        conn.close();
+        peer.disconnect();
+        status.innerText = "Status: Connection closed, refresh this page to restart";
+      })
+    }
+
+    function initName(data) {
+      if (!data.name) {
+        conn.close();
+        peer.disconnect();
+        return;
+      }
+      name = data.name;
+      status.innerText = `User ${name} is connected.`;
+      peer.disconnect();
+
+      conn.on('data', displayMessage);
+    }
+
+    function displayMessage(data) {
+      const div = createElementFromHTML(`<p>${urlify(data)}</p><hr>`)
+      message.appendChild(div);
+    }
+
+    function connectPeer(targetId) {
+      peer = new Peer();
+      peer.on('open', function (id) {
+        console.log('My peer ID is: ' + id);
+        status.innerText = "Status: Connecting to server..."
+
+        getName().then(json => {
+          name = json.results?.[0]?.name?.first;
+          conn = peer.connect(targetId);
+          conn.on('open', () => {
+            peer.disconnect();
+            status.innerText = `User: ${name}`
+            text.hidden = false;
+            sendBtn.hidden = false;
+            conn.send({ name });
+          });
+          conn.on('data', (data) => {
+            // Will print 'hi!'
+            console.log(data);
+          });
+          conn.on("error", () => {
+            conn.close();
+            peer.disconnect();
+            status.innerText = "Status: Error occurred, close this page and scan the qrcode again";
+          })
+          conn.on("close", () => {
+            conn.close();
+            peer.disconnect();
+            status.innerText = "Status: Connection closed, close this page and scan the qrcode again";
+          })
+        })
+      });
+    }
+
+    function getName() {
+      return fetch("https://randomuser.me/api/?inc=name", {
+        "body": null,
+        "method": "GET",
+        "mode": "cors"
+      }).then(res => res.json());
+    }
+
+    function urlify(text) {
+      var urlRegex = /(https?:\/\/[^\s]+)/g;
+      return text.replace(urlRegex, '<a href="$1">$1</a>')
+    }
+
+    function createElementFromHTML(htmlString) {
+      var div = document.createElement('div');
+      div.innerHTML = htmlString.trim();
+
+      // Change this to div.childNodes to support multiple top-level nodes
+      return div;
+    }
+  </script>
+</body>
+
+</html>
